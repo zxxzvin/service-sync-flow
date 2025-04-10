@@ -23,10 +23,13 @@ const ServiceTimer = ({ minimal = false }: ServiceTimerProps) => {
   const [progress, setProgress] = useState(0);
   const [timeRemaining, setTimeRemaining] = useState(0);
 
+  // This effect handles timer state updates and updates the UI
   useEffect(() => {
     if (!currentService || !timer.currentItemId) {
       setCurrentItem(null);
       setNextItem(null);
+      setProgress(0);
+      setTimeRemaining(0);
       return;
     }
 
@@ -56,7 +59,7 @@ const ServiceTimer = ({ minimal = false }: ServiceTimerProps) => {
     setTimeRemaining(remaining);
     setProgress(Math.min(100, (elapsed / totalDuration) * 100));
     
-  }, [currentService, timer, timer.elapsedTime]);
+  }, [currentService, timer.currentItemId, timer.elapsedTime]);
 
   const handleStartNextItem = () => {
     if (!nextItem) return;

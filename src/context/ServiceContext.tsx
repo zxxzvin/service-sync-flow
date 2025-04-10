@@ -1,7 +1,7 @@
-
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { toast } from '@/hooks/use-toast';
 import { useAuth } from './AuthContext';
+import { supabase } from '@/integrations/supabase/client';
 
 export interface ServiceItem {
   id: string;
@@ -117,14 +117,88 @@ export const ServiceProvider = ({ children }: { children: ReactNode }) => {
     elapsedTime: 0
   });
 
-  // Timer update interval
+  // Subscribe to real-time timer updates when current service is selected
+  useEffect(() => {
+    if (!currentService) return;
+    
+    // Subscribe to timer_state changes for the current service
+    const channel = supabase
+      .channel('timer_updates')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'timer_state',
+          filter: `service_id=eq.${currentService.id}`
+        },
+        async (payload) => {
+          // Get the updated timer state
+          if (payload.new) {
+            const newTimerState = payload.new as any;
+            
+            // Convert to our timer state format
+            let updatedTimer: TimerState = {
+              isRunning: newTimerState.is_running,
+              currentItemId: newTimerState.current_item_id,
+              startTime: newTimerState.is_running ? Date.now() - (newTimerState.elapsed_time * 1000) : null,
+              elapsedTime: newTimerState.elapsed_time
+            };
+            
+            // Update local timer state without triggering more database updates
+            setTimer(updatedTimer);
+          }
+        }
+      )
+      .subscribe();
+    
+    // Get initial timer state
+    const fetchTimerState = async () => {
+      const { data, error } = await supabase
+        .from('timer_state')
+        .select('*')
+        .eq('service_id', currentService.id)
+        .maybeSingle();
+      
+      if (error) {
+        console.error('Error fetching timer state:', error);
+        return;
+      }
+      
+      if (data) {
+        // Set initial timer state
+        setTimer({
+          isRunning: data.is_running,
+          currentItemId: data.current_item_id,
+          startTime: data.is_running ? Date.now() - (data.elapsed_time * 1000) : null,
+          elapsedTime: data.elapsed_time
+        });
+      } else {
+        // Create initial timer state for this service
+        await supabase.from('timer_state').insert({
+          service_id: currentService.id,
+          is_running: false,
+          current_item_id: null,
+          elapsed_time: 0
+        });
+      }
+    };
+    
+    fetchTimerState();
+    
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentService]);
+
+  // Timer update interval - only for displaying correct time locally
   useEffect(() => {
     let interval: NodeJS.Timeout;
     
     if (timer.isRunning && timer.startTime !== null) {
       interval = setInterval(() => {
         const now = Date.now();
-        const elapsed = Math.floor((now - timer.startTime) / 1000) + timer.elapsedTime;
+        const elapsed = Math.floor((now - timer.startTime) / 1000);
         
         setTimer(prev => ({
           ...prev,
@@ -194,7 +268,7 @@ export const ServiceProvider = ({ children }: { children: ReactNode }) => {
     const service = services.find(s => s.id === id);
     setCurrentService(service || null);
     
-    // Reset timer when changing services
+    // Reset local timer state when changing services
     setTimer({
       isRunning: false,
       currentItemId: null,
@@ -246,18 +320,46 @@ export const ServiceProvider = ({ children }: { children: ReactNode }) => {
     });
   };
 
-  const startTimer = (itemId: string) => {
+  // Update timer state in the database
+  const updateTimerState = async (updates: {
+    is_running?: boolean,
+    current_item_id?: string | null,
+    elapsed_time?: number
+  }) => {
+    if (!currentService) return;
+    
+    try {
+      await supabase
+        .from('timer_state')
+        .update(updates)
+        .eq('service_id', currentService.id);
+    } catch (error) {
+      console.error('Error updating timer state:', error);
+    }
+  };
+
+  const startTimer = async (itemId: string) => {
     if (!currentService) return;
     
     const item = currentService.items.find(i => i.id === itemId);
     if (!item) return;
     
-    setTimer({
+    // Update timer in database
+    await updateTimerState({
+      is_running: true,
+      current_item_id: itemId,
+      elapsed_time: 0
+    });
+    
+    // Update local state
+    const newTimerState = {
       isRunning: true,
       currentItemId: itemId,
       startTime: Date.now(),
       elapsedTime: 0
-    });
+    };
+    
+    setTimer(newTimerState);
     
     toast({
       title: "Timer started",
@@ -265,7 +367,16 @@ export const ServiceProvider = ({ children }: { children: ReactNode }) => {
     });
   };
 
-  const pauseTimer = () => {
+  const pauseTimer = async () => {
+    if (!currentService) return;
+    
+    // Update timer in database
+    await updateTimerState({
+      is_running: false,
+      elapsed_time: timer.elapsedTime
+    });
+    
+    // Update local state
     setTimer(prev => ({
       ...prev,
       isRunning: false,
@@ -273,7 +384,17 @@ export const ServiceProvider = ({ children }: { children: ReactNode }) => {
     }));
   };
 
-  const resetTimer = () => {
+  const resetTimer = async () => {
+    if (!currentService) return;
+    
+    // Update timer in database
+    await updateTimerState({
+      is_running: false,
+      current_item_id: null,
+      elapsed_time: 0
+    });
+    
+    // Update local state
     setTimer({
       isRunning: false,
       currentItemId: null,
@@ -287,12 +408,20 @@ export const ServiceProvider = ({ children }: { children: ReactNode }) => {
     });
   };
 
-  const skipToItem = (itemId: string) => {
+  const skipToItem = async (itemId: string) => {
     if (!currentService) return;
     
     const item = currentService.items.find(i => i.id === itemId);
     if (!item) return;
     
+    // Update timer in database
+    await updateTimerState({
+      is_running: true,
+      current_item_id: itemId,
+      elapsed_time: 0
+    });
+    
+    // Update local state
     setTimer({
       isRunning: true,
       currentItemId: itemId,

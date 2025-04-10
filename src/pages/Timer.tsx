@@ -8,11 +8,11 @@ import { useService } from "@/context/ServiceContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatTime } from "@/components/service/ServiceTimer";
 import { Button } from "@/components/ui/button";
-import { Play } from "lucide-react";
+import { Play, RefreshCw } from "lucide-react";
 
 const Timer = () => {
   const { user } = useAuth();
-  const { currentService, timer, startTimer } = useService();
+  const { currentService, timer, startTimer, resetTimer } = useService();
   const navigate = useNavigate();
   
   useEffect(() => {
@@ -25,6 +25,8 @@ const Timer = () => {
     return null;
   }
 
+  const canControl = user.role === 'admin' || user.role === 'planner';
+
   return (
     <MainLayout>
       <div className="container py-6">
@@ -34,7 +36,7 @@ const Timer = () => {
           <div className="mx-auto w-full max-w-2xl">
             <ServiceTimer />
             
-            {currentService && !timer.currentItemId && (
+            {currentService && !timer.currentItemId && canControl && (
               <Card className="mt-6">
                 <CardHeader>
                   <CardTitle>Service Items</CardTitle>
@@ -55,6 +57,20 @@ const Timer = () => {
                   </div>
                 </CardContent>
               </Card>
+            )}
+            
+            {currentService && !timer.currentItemId && !canControl && (
+              <div className="text-center mt-6 p-6 border rounded-lg bg-muted/20">
+                <p className="text-muted-foreground">Waiting for service to start...</p>
+              </div>
+            )}
+            
+            {timer.isRunning && canControl && (
+              <div className="mt-4 flex justify-center">
+                <Button variant="outline" onClick={resetTimer}>
+                  <RefreshCw size={16} className="mr-2" /> Reset Timer
+                </Button>
+              </div>
             )}
           </div>
         </div>
