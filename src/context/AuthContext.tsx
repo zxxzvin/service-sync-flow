@@ -1,6 +1,8 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { toast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
+import { User, Session } from '@supabase/supabase-js';
 
 export type UserRole = 'admin' | 'planner' | 'volunteer';
 
@@ -23,68 +25,86 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Mock user data since we don't have Supabase yet
-const mockUsers = [
-  {
-    id: '1',
-    email: 'admin@example.com',
-    password: 'admin123',
-    name: 'Admin User',
-    role: 'admin' as UserRole,
-  },
-  {
-    id: '2',
-    email: 'planner@example.com',
-    password: 'planner123',
-    name: 'Planner User',
-    role: 'planner' as UserRole,
-  },
-  {
-    id: '3',
-    email: 'volunteer@example.com',
-    password: 'volunteer123',
-    name: 'Volunteer User',
-    role: 'volunteer' as UserRole,
-  },
-];
-
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Check for stored session on mount
   useEffect(() => {
-    const storedUser = localStorage.getItem('worshipPlanner_user');
-    if (storedUser) {
-      try {
-        setUser(JSON.parse(storedUser));
-      } catch (error) {
-        console.error('Failed to parse stored user:', error);
-        localStorage.removeItem('worshipPlanner_user');
+    // Set up auth state listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (session?.user) {
+          // Fetch the user's profile from Supabase
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('name, role')
+            .eq('id', session.user.id)
+            .single();
+
+          if (data) {
+            setUser({
+              id: session.user.id,
+              email: session.user.email || '',
+              name: data.name,
+              role: data.role as UserRole,
+            });
+          } else if (error) {
+            console.error('Error fetching profile:', error);
+          }
+        } else {
+          setUser(null);
+        }
       }
-    }
-    setLoading(false);
+    );
+
+    // Check for existing session
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session?.user) {
+        // Fetch the user's profile from Supabase
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('name, role')
+          .eq('id', session.user.id)
+          .single();
+
+        if (data) {
+          setUser({
+            id: session.user.id,
+            email: session.user.email || '',
+            name: data.name,
+            role: data.role as UserRole,
+          });
+        } else {
+          console.error('Error fetching profile:', error);
+        }
+      }
+      
+      setLoading(false);
+    };
+
+    checkSession();
+
+    return () => {
+      subscription?.unsubscribe();
+    };
   }, []);
 
   const login = async (email: string, password: string) => {
     setLoading(true);
     try {
-      // Mock authentication
-      const foundUser = mockUsers.find(
-        (u) => u.email === email && u.password === password
-      );
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
       
-      if (foundUser) {
-        const { password, ...userWithoutPassword } = foundUser;
-        setUser(userWithoutPassword);
-        localStorage.setItem('worshipPlanner_user', JSON.stringify(userWithoutPassword));
-        toast({
-          title: "Logged in successfully",
-          description: `Welcome back, ${userWithoutPassword.name}!`
-        });
-      } else {
-        throw new Error('Invalid email or password');
-      }
+      if (error) throw error;
+      
+      toast({
+        title: "Logged in successfully",
+        description: `Welcome back!`
+      });
     } catch (error) {
       console.error('Login failed:', error);
       toast({
@@ -100,26 +120,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const register = async (email: string, password: string, name: string) => {
     setLoading(true);
     try {
-      // Check if user already exists
-      if (mockUsers.some((u) => u.email === email)) {
-        throw new Error('User with this email already exists');
-      }
-      
-      // In a real implementation, we would create the user in Supabase
-      // For now, we'll just mock it and add to our array
-      const newUser = {
-        id: `${mockUsers.length + 1}`,
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        name,
-        role: 'volunteer' as UserRole,
-      };
+        options: {
+          data: {
+            name,
+          },
+        },
+      });
       
-      mockUsers.push(newUser);
-      
-      const { password: _, ...userWithoutPassword } = newUser;
-      setUser(userWithoutPassword);
-      localStorage.setItem('worshipPlanner_user', JSON.stringify(userWithoutPassword));
+      if (error) throw error;
       
       toast({
         title: "Registration successful",
@@ -137,13 +148,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const logout = () => {
-    setUser(null);
-    localStorage.removeItem('worshipPlanner_user');
-    toast({
-      title: "Logged out",
-      description: "You have been logged out successfully."
-    });
+  const logout = async () => {
+    try {
+      await supabase.auth.signOut();
+      toast({
+        title: "Logged out",
+        description: "You have been logged out successfully."
+      });
+    } catch (error) {
+      console.error('Logout failed:', error);
+      toast({
+        variant: "destructive",
+        title: "Logout failed",
+        description: (error as Error).message
+      });
+    }
   };
 
   const isAdmin = () => user?.role === 'admin';

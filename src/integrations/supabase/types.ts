@@ -9,7 +9,163 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      [_ in never]: never
+      profiles: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          role: string
+        }
+        Insert: {
+          created_at?: string
+          id: string
+          name: string
+          role?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          role?: string
+        }
+        Relationships: []
+      }
+      service_editors: {
+        Row: {
+          id: string
+          service_id: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          service_id: string
+          user_id: string
+        }
+        Update: {
+          id?: string
+          service_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_editors_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      service_items: {
+        Row: {
+          created_at: string
+          description: string | null
+          duration: number
+          id: string
+          notes: string | null
+          person_in_charge: string | null
+          position: number
+          service_id: string
+          song_list: string[] | null
+          title: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          duration: number
+          id?: string
+          notes?: string | null
+          person_in_charge?: string | null
+          position: number
+          service_id: string
+          song_list?: string[] | null
+          title: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          duration?: number
+          id?: string
+          notes?: string | null
+          person_in_charge?: string | null
+          position?: number
+          service_id?: string
+          song_list?: string[] | null
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_items_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      services: {
+        Row: {
+          created_at: string
+          created_by: string
+          date: string
+          id: string
+          title: string
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          date: string
+          id?: string
+          title: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          date?: string
+          id?: string
+          title?: string
+        }
+        Relationships: []
+      }
+      timer_state: {
+        Row: {
+          current_item_id: string | null
+          elapsed_time: number
+          is_running: boolean
+          service_id: string
+          updated_at: string
+        }
+        Insert: {
+          current_item_id?: string | null
+          elapsed_time?: number
+          is_running?: boolean
+          service_id: string
+          updated_at?: string
+        }
+        Update: {
+          current_item_id?: string | null
+          elapsed_time?: number
+          is_running?: boolean
+          service_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "timer_state_current_item_id_fkey"
+            columns: ["current_item_id"]
+            isOneToOne: false
+            referencedRelation: "service_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "timer_state_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: true
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
