@@ -40,7 +40,7 @@ const Users = () => {
   });
   const [dialogOpen, setDialogOpen] = useState(false);
   
-  // Fetch users from Supabase
+  // Fetch users from Supabase - improved to work with profiles table
   const fetchUsers = async () => {
     try {
       setIsLoading(true);
@@ -52,25 +52,17 @@ const Users = () => {
         throw error;
       }
       
-      // Get emails for each user
-      const usersWithEmails = await Promise.all(
-        data.map(async (profile) => {
-          const { data: userData } = await supabase
-            .from('auth.users')
-            .select('email')
-            .eq('id', profile.id)
-            .single();
-            
-          return {
-            id: profile.id,
-            name: profile.name,
-            role: profile.role as UserRole,
-            email: userData?.email || 'No email'
-          } as User;
-        })
-      );
-      
-      setUsers(usersWithEmails);
+      if (data) {
+        // Transform the data into the User interface format
+        const usersData = data.map((profile) => ({
+          id: profile.id,
+          name: profile.name,
+          role: profile.role as UserRole,
+          email: '' // We'll fill this with an empty string initially
+        }));
+        
+        setUsers(usersData);
+      }
     } catch (error) {
       console.error('Error fetching users:', error);
       toast({
@@ -138,8 +130,18 @@ const Users = () => {
         role: "volunteer",
       });
       setDialogOpen(false);
+      
+      toast({
+        title: "User Created",
+        description: "New user has been created successfully.",
+      });
     } catch (error) {
       console.error('Failed to create user:', error);
+      toast({
+        variant: "destructive",
+        title: "User Creation Failed", 
+        description: error instanceof Error ? error.message : "An unknown error occurred"
+      });
     }
   };
   
@@ -331,7 +333,8 @@ const Users = () => {
                       </div>
                       <div>
                         <p className="font-medium">{u.name}</p>
-                        <p className="text-sm text-muted-foreground">{u.email}</p>
+                        {/* Email might not be available, so displaying username/name instead */}
+                        <p className="text-sm text-muted-foreground">{u.email || u.name}</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
