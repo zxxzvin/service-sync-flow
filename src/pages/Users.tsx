@@ -25,50 +25,63 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "@/hooks/use-toast";
 import { Plus, Trash, User as UserIcon } from "lucide-react";
-
-// Mock users data
-const mockUsers: User[] = [
-  {
-    id: "1",
-    email: "admin@example.com",
-    name: "Admin User",
-    role: "admin",
-  },
-  {
-    id: "2",
-    email: "planner@example.com",
-    name: "Planner User",
-    role: "planner",
-  },
-  {
-    id: "3",
-    email: "volunteer@example.com",
-    name: "Volunteer User",
-    role: "volunteer",
-  },
-  {
-    id: "4",
-    email: "jane@example.com",
-    name: "Jane Smith",
-    role: "volunteer",
-  },
-  {
-    id: "5",
-    email: "mark@example.com",
-    name: "Mark Johnson",
-    role: "planner",
-  },
-];
+import { supabase } from "@/integrations/supabase/client";
 
 const Users = () => {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, createUser } = useAuth();
   const navigate = useNavigate();
-  const [users, setUsers] = useState<User[]>(mockUsers);
+  const [users, setUsers] = useState<User[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [newUser, setNewUser] = useState({
     name: "",
     email: "",
+    password: "",
     role: "volunteer" as UserRole,
   });
+  const [dialogOpen, setDialogOpen] = useState(false);
+  
+  // Fetch users from Supabase
+  const fetchUsers = async () => {
+    try {
+      setIsLoading(true);
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, name, role');
+        
+      if (error) {
+        throw error;
+      }
+      
+      // Get emails for each user
+      const usersWithEmails = await Promise.all(
+        data.map(async (profile) => {
+          const { data: userData } = await supabase
+            .from('auth.users')
+            .select('email')
+            .eq('id', profile.id)
+            .single();
+            
+          return {
+            id: profile.id,
+            name: profile.name,
+            role: profile.role as UserRole,
+            email: userData?.email || 'No email'
+          } as User;
+        })
+      );
+      
+      setUsers(usersWithEmails);
+    } catch (error) {
+      console.error('Error fetching users:', error);
+      toast({
+        variant: "destructive",
+        title: "Failed to load users",
+        description: "There was a problem loading the users. Please try again."
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
   
   useEffect(() => {
     if (!user) {
@@ -78,6 +91,8 @@ const Users = () => {
     
     if (!(isAdmin() || user.role === "planner")) {
       navigate("/");
+    } else {
+      fetchUsers();
     }
   }, [user, isAdmin, navigate]);
 
@@ -85,8 +100,17 @@ const Users = () => {
     return null;
   }
   
-  const handleCreateUser = () => {
-    if (!newUser.name || !newUser.email) {
+  const handleCreateUser = async () => {
+    if (!isAdmin()) {
+      toast({
+        variant: "destructive",
+        title: "Permission Denied",
+        description: "Only administrators can create new users.",
+      });
+      return;
+    }
+    
+    if (!newUser.name || !newUser.email || !newUser.password) {
       toast({
         variant: "destructive",
         title: "Validation Error",
@@ -95,28 +119,31 @@ const Users = () => {
       return;
     }
     
-    const newUserObj: User = {
-      id: (users.length + 1).toString(),
-      name: newUser.name,
-      email: newUser.email,
-      role: newUser.role,
-    };
-    
-    setUsers([...users, newUserObj]);
-    
-    toast({
-      title: "User Created",
-      description: `${newUser.name} has been created successfully.`,
-    });
-    
-    setNewUser({
-      name: "",
-      email: "",
-      role: "volunteer",
-    });
+    try {
+      await createUser(
+        newUser.email,
+        newUser.password,
+        newUser.name,
+        newUser.role
+      );
+      
+      // Refresh the users list
+      fetchUsers();
+      
+      // Reset form and close dialog
+      setNewUser({
+        name: "",
+        email: "",
+        password: "",
+        role: "volunteer",
+      });
+      setDialogOpen(false);
+    } catch (error) {
+      console.error('Failed to create user:', error);
+    }
   };
   
-  const handleChangeRole = (userId: string, newRole: UserRole) => {
+  const handleChangeRole = async (userId: string, newRole: UserRole) => {
     if (!isAdmin()) {
       toast({
         variant: "destructive",
@@ -126,19 +153,33 @@ const Users = () => {
       return;
     }
     
-    const updatedUsers = users.map((u) =>
-      u.id === userId ? { ...u, role: newRole } : u
-    );
-    
-    setUsers(updatedUsers);
-    
-    toast({
-      title: "Role Updated",
-      description: `User role has been updated to ${newRole}.`,
-    });
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ role: newRole })
+        .eq('id', userId);
+        
+      if (error) throw error;
+      
+      setUsers(users.map(u => 
+        u.id === userId ? { ...u, role: newRole } : u
+      ));
+      
+      toast({
+        title: "Role Updated",
+        description: `User role has been updated to ${newRole}.`,
+      });
+    } catch (error) {
+      console.error('Failed to update role:', error);
+      toast({
+        variant: "destructive",
+        title: "Update Failed",
+        description: "There was a problem updating the user role.",
+      });
+    }
   };
   
-  const handleDeleteUser = (userId: string) => {
+  const handleDeleteUser = async (userId: string) => {
     if (!isAdmin()) {
       toast({
         variant: "destructive",
@@ -158,13 +199,28 @@ const Users = () => {
       return;
     }
     
-    const updatedUsers = users.filter((u) => u.id !== userId);
-    setUsers(updatedUsers);
-    
-    toast({
-      title: "User Deleted",
-      description: "User has been removed successfully.",
-    });
+    try {
+      // This will be handled by the Admin API in our edge function
+      const { error } = await supabase.functions.invoke('delete-user', {
+        body: { userId }
+      });
+      
+      if (error) throw error;
+      
+      setUsers(users.filter(u => u.id !== userId));
+      
+      toast({
+        title: "User Deleted",
+        description: "User has been removed successfully.",
+      });
+    } catch (error) {
+      console.error('Failed to delete user:', error);
+      toast({
+        variant: "destructive",
+        title: "Deletion Failed",
+        description: "There was a problem deleting the user.",
+      });
+    }
   };
 
   return (
@@ -173,7 +229,7 @@ const Users = () => {
         <div className="flex justify-between items-center">
           <h1 className="text-3xl font-bold">User Management</h1>
           {isAdmin() && (
-            <Dialog>
+            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
               <DialogTrigger asChild>
                 <Button>
                   <Plus size={18} className="mr-1" /> Add User
@@ -210,6 +266,17 @@ const Users = () => {
                   </div>
                   
                   <div className="grid gap-2">
+                    <Label htmlFor="password">Password</Label>
+                    <Input
+                      id="password"
+                      type="password"
+                      placeholder="••••••••"
+                      value={newUser.password}
+                      onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                    />
+                  </div>
+                  
+                  <div className="grid gap-2">
                     <Label htmlFor="role">Role</Label>
                     <Select
                       value={newUser.role}
@@ -228,7 +295,7 @@ const Users = () => {
                 </div>
                 
                 <DialogFooter>
-                  <Button variant="outline" onClick={() => setNewUser({ name: "", email: "", role: "volunteer" })}>
+                  <Button variant="outline" onClick={() => setDialogOpen(false)}>
                     Cancel
                   </Button>
                   <Button onClick={handleCreateUser}>Create User</Button>
@@ -246,54 +313,64 @@ const Users = () => {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {users.map((u) => (
-                <div key={u.id} className="flex items-center justify-between p-4 border rounded-lg">
-                  <div className="flex items-center space-x-4">
-                    <div className="bg-primary/10 p-2 rounded-full text-primary">
-                      <UserIcon size={24} />
+            {isLoading ? (
+              <div className="flex justify-center py-8">
+                <p className="text-muted-foreground">Loading users...</p>
+              </div>
+            ) : users.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-muted-foreground">No users found.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {users.map((u) => (
+                  <div key={u.id} className="flex items-center justify-between p-4 border rounded-lg">
+                    <div className="flex items-center space-x-4">
+                      <div className="bg-primary/10 p-2 rounded-full text-primary">
+                        <UserIcon size={24} />
+                      </div>
+                      <div>
+                        <p className="font-medium">{u.name}</p>
+                        <p className="text-sm text-muted-foreground">{u.email}</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="font-medium">{u.name}</p>
-                      <p className="text-sm text-muted-foreground">{u.email}</p>
+                    <div className="flex items-center gap-3">
+                      {isAdmin() && (
+                        <Select
+                          value={u.role}
+                          onValueChange={(value: UserRole) => handleChangeRole(u.id, value as UserRole)}
+                        >
+                          <SelectTrigger className="w-32">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="volunteer">Volunteer</SelectItem>
+                            <SelectItem value="planner">Planner</SelectItem>
+                            <SelectItem value="admin">Administrator</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
+                      {!isAdmin() && (
+                        <span className="px-3 py-1 bg-muted rounded-full text-sm font-medium capitalize">
+                          {u.role}
+                        </span>
+                      )}
+                      
+                      {isAdmin() && u.id !== user.id && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleDeleteUser(u.id)}
+                          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        >
+                          <Trash size={18} />
+                        </Button>
+                      )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    {isAdmin() && (
-                      <Select
-                        value={u.role}
-                        onValueChange={(value: UserRole) => handleChangeRole(u.id, value)}
-                      >
-                        <SelectTrigger className="w-32">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="volunteer">Volunteer</SelectItem>
-                          <SelectItem value="planner">Planner</SelectItem>
-                          <SelectItem value="admin">Administrator</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    )}
-                    {!isAdmin() && (
-                      <span className="px-3 py-1 bg-muted rounded-full text-sm font-medium capitalize">
-                        {u.role}
-                      </span>
-                    )}
-                    
-                    {isAdmin() && u.id !== user.id && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleDeleteUser(u.id)}
-                        className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                      >
-                        <Trash size={18} />
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

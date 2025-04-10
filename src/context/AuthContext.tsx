@@ -2,7 +2,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { toast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { User, Session } from '@supabase/supabase-js';
+import { User as SupabaseUser, Session } from '@supabase/supabase-js';
+import { v4 as uuidv4 } from 'uuid';
 
 export type UserRole = 'admin' | 'planner' | 'volunteer';
 
@@ -21,6 +22,7 @@ interface AuthContextType {
   logout: () => void;
   isAdmin: () => boolean;
   isPlanner: () => boolean;
+  createUser: (email: string, password: string, name: string, role: UserRole) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -148,6 +150,46 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const createUser = async (email: string, password: string, name: string, role: UserRole) => {
+    if (!isAdmin()) {
+      toast({
+        variant: "destructive",
+        title: "Permission denied",
+        description: "Only administrators can create user accounts."
+      });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Create a temporary random password if not provided
+      const finalPassword = password || uuidv4();
+      
+      // First create the user in Supabase Auth
+      const { data: authData, error: authError } = await supabase.functions.invoke('create-user', {
+        body: { email, password: finalPassword, name, role }
+      });
+      
+      if (authError) throw authError;
+      
+      toast({
+        title: "User created",
+        description: `${name} (${role}) has been added successfully.`
+      });
+      
+      return authData;
+    } catch (error) {
+      console.error('User creation failed:', error);
+      toast({
+        variant: "destructive",
+        title: "User creation failed",
+        description: (error as Error).message
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const logout = async () => {
     try {
       await supabase.auth.signOut();
@@ -178,6 +220,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         logout,
         isAdmin,
         isPlanner,
+        createUser,
       }}
     >
       {children}
