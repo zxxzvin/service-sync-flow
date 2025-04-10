@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import { useService, ServiceItem } from "@/context/ServiceContext";
 import { useAuth } from "@/context/AuthContext";
@@ -36,7 +35,7 @@ interface ServiceRundownProps {
 }
 
 const ServiceRundown = ({ serviceId }: ServiceRundownProps) => {
-  const { currentService, services, selectService, addServiceItem, updateServiceItem, deleteServiceItem, canEditService, startTimer, timer } = useService();
+  const { currentService, services, selectService, addServiceItem, updateServiceItem, deleteServiceItem, canEditService, startTimer, timer, updateService } = useService();
   const { user } = useAuth();
   const [editingItem, setEditingItem] = useState<ServiceItem | null>(null);
   const [newItem, setNewItem] = useState<Partial<Omit<ServiceItem, 'id'>>>({
@@ -83,10 +82,10 @@ const ServiceRundown = ({ serviceId }: ServiceRundownProps) => {
 
   const canEdit = canEditService(service.id);
   const isItemActive = (itemId: string) => timer.currentItemId === itemId;
-  
+
   const handleSaveNewItem = () => {
     if (!newItem.title) return;
-    
+
     addServiceItem({
       title: newItem.title,
       description: newItem.description || '',
@@ -95,7 +94,7 @@ const ServiceRundown = ({ serviceId }: ServiceRundownProps) => {
       personInCharge: newItem.personInCharge || '',
       songList: newItem.songList || []
     });
-    
+
     setNewItem({
       title: '',
       description: '',
@@ -104,10 +103,10 @@ const ServiceRundown = ({ serviceId }: ServiceRundownProps) => {
       notes: '',
     });
   };
-  
+
   const handleSaveEditedItem = () => {
     if (!editingItem) return;
-    
+
     updateServiceItem(editingItem.id, {
       title: editingItem.title,
       description: editingItem.description,
@@ -116,24 +115,22 @@ const ServiceRundown = ({ serviceId }: ServiceRundownProps) => {
       personInCharge: editingItem.personInCharge,
       songList: editingItem.songList
     });
-    
+
     setEditingItem(null);
   };
 
   const handleMoveItem = (index: number, direction: 'up' | 'down') => {
     if (!service) return;
-    
+
     const newIndex = direction === 'up' ? index - 1 : index + 1;
     if (newIndex < 0 || newIndex >= service.items.length) return;
-    
+
     const newItems = [...service.items];
     const temp = newItems[index];
     newItems[index] = newItems[newIndex];
     newItems[newIndex] = temp;
-    
-    selectService(null); // Deselect to avoid conflicts
-    updateServiceItem(service.id, { items: newItems });
-    selectService(service.id); // Reselect
+
+    updateService(service.id, { items: newItems });
   };
 
   return (
